@@ -77,7 +77,3 @@ class FTPClient:
         self.client.sendall(command)
         self.client.close()
 
-
-# client = Client("192.168.24.251",5000)
-
-# gui = GUI(client=client)

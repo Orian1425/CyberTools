@@ -1,4 +1,5 @@
 # gui/ftp_page.py
+import config
 import customtkinter as ctk
 from tkinter import filedialog
 from tools.FTP.ftp_client import FTPClient
@@ -23,7 +24,7 @@ class FTPPage(ctk.CTkFrame):
         self.download_btn.pack(pady=10)
 
         # לוגים
-        self.log_box = ctk.CTkTextbox(self, width=500, height=150)
+        self.log_box = ctk.CTkTextbox(self, width=450, height=150)
         self.log_box.pack(pady=20)
 
     def log(self, msg):
@@ -33,13 +34,13 @@ class FTPPage(ctk.CTkFrame):
     def handle_upload(self):
         path = filedialog.askopenfilename()
         if path:
-            client = FTPClient("127.0.0.1", 5005)
+            client = FTPClient(config.HOST_IP, config.PORTS["FTP"])
             self.log(f"Upload Status: {client.upload_file_to_server(path) if client.is_connected else 'SERVER_DOWN'}")
 
     def handle_download(self):
         filename = self.filename_entry.get()
         if filename:
-            client = FTPClient("127.0.0.1", 5005)
+            client = FTPClient(config.HOST_IP, config.DEFAULT_PORT)
             self.log(f"Download Status: {client.download_file_to_client(filename) if client.is_connected else 'SERVER_DOWN'}")
         else:
             self.log(f"Download Status: NO_FILE_SELECTED")
