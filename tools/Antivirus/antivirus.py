@@ -11,7 +11,7 @@ class VirusTotalScanner:
             "x-apikey": self.api_key
         }
 
-    def scan_file(self, file_path, callback):
+    def scan_file(self, file_path, callback, done_event: threading.Event = None):
         """
         מריץ את הסריקה ב-Thread נפרד כדי לא לתקוע את ה-GUI.
         בסיום, קורא לפונקציית callback עם התוצאה.
@@ -49,5 +49,8 @@ class VirusTotalScanner:
 
             except Exception as e:
                 callback(f"Exception: {str(e)}")
+            finally:
+                if done_event:
+                    done_event.set()
 
         threading.Thread(target=task, daemon=True).start()

@@ -1,10 +1,10 @@
 import config
 import customtkinter as ctk
-from gui.av_page import AVPage
-from gui.ftp_page import FTPPage
-from gui.settings_page import SettingsPage
+from gui.pages.av_page import AVPage
+from gui.pages.ftp_page import FTPPage
+from gui.pages.settings_page import SettingsPage
 
-# הגדרת מראה האפליקציה (כהה מתאים לסייבר!)
+# הגדרת מראה האפליקציה 
 ctk.set_appearance_mode(config.APPEARANCE_MODE)
 ctk.set_default_color_theme(config.DEFAULT_COLOR_THEME)
 

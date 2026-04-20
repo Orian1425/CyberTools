@@ -1,4 +1,7 @@
 # gui/av_page.py
+import os
+import threading
+import time
 import config
 import customtkinter as ctk
 from tkinter import filedialog
@@ -51,11 +54,42 @@ class AVPage(ctk.CTkFrame):
 
     def handle_folder_scan(self):
         folder_path = filedialog.askdirectory()
-        if folder_path:
-            self.log(f"Scanning folder: {folder_path} (API Limits apply)")
-            # כאן אפשר להוסיף לוגיקה שרצה על כל הקבצים בתיקייה
-            # חשוב לזכור: VirusTotal חינמי מוגבל ל-4 קבצים בדקה!
+        if not folder_path:
+            return
 
+        # 1. איסוף כל הקבצים
+        all_files = self.get_all_files(folder_path)
+        
+        # 2. הגבלה ל-4 קבצים (בגלל מגבלת ה-API החינמי)
+        files_to_scan = all_files[:4] 
+        
+        if len(all_files) > 4:
+            self.log(f"Note: Found {len(all_files)} files, but free API limits us to 4.")
+
+        # 3. הרצת הסריקה ב-Thread נפרד כדי לא לתקוע את ה-GUI
+        threading.Thread(target=self.process_queue, args=(files_to_scan,), daemon=True).start()
+
+    def process_queue(self, file_list):
+        """עובר על הקבצים אחד אחד עם השהיה ביניהם"""
+        self.progress.start()
+        for file_path in file_list:
+            self.log(f"Processing: {os.path.basename(file_path)}")
+            scan_done = threading.Event()
+            # אנחנו צריכים ש-scan_file יהיה סינכרוני במקרה הזה או להשתמש ב-Event
+            # לצורך הפשטות, נפעיל את הסריקה ונחכה 15 שניות בין קובץ לקובץ (מגבלת ה-Rate Limit)
+            self.scanner.scan_file(file_path, self.on_scan_complete, scan_done)
+            scan_done.wait()
+        self.log("Folder scan task finished.")
+        self.progress.stop()
+
+    def get_all_files(self, path):
+        """פונקציית עזר שאוספת את כל הקבצים בתיקייה ובתתי-תיקיות"""
+        file_list = []
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                file_list.append(os.path.join(root, file))
+        return file_list
+    
     def on_scan_complete(self, result):
         """פונקציה שנקראת כשהסריקה מסתיימת"""
         self.log(result)
