@@ -3,6 +3,7 @@ import customtkinter as ctk
 from gui.pages.av_page import AVPage
 from gui.pages.ftp_page import FTPPage
 from gui.pages.settings_page import SettingsPage
+from gui.pages.physics_page import PhysicsPage
 
 # הגדרת מראה האפליקציה 
 ctk.set_appearance_mode(config.APPEARANCE_MODE)
@@ -38,6 +39,9 @@ class CyberAppGUI(ctk.CTk):
         self.av_btn = ctk.CTkButton(self.sidebar, text="Anti-Virus", command=lambda: self.show_page("AV"))
         self.av_btn.pack(pady=10, padx=10)
 
+        self.physics_btn = ctk.CTkButton(self.sidebar, text="Physics Sim", command=lambda: self.show_page("Physics"))
+        self.physics_btn.pack(pady=10, padx=10)
+
         self.settings_btn = ctk.CTkButton(self.sidebar, text="Settings", command=lambda: self.show_page("Settings"), fg_color="gray")
         self.settings_btn.pack(side="bottom", pady=20, padx=10)
 
@@ -52,6 +56,8 @@ class CyberAppGUI(ctk.CTk):
             self.current_page = FTPPage(self.container)
         elif page_name == "AV":
             self.current_page = AVPage(self.container)
+        elif page_name == "Physics":
+            self.current_page = PhysicsPage(self.container)
         elif page_name == "Settings":
             self.current_page = SettingsPage(self.container)
         
