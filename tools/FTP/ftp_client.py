@@ -31,24 +31,32 @@ class FTPClient:
             self.client.sendall(command)
             self.client.sendall((filename + '\n').encode())
             
+            # Handshake
+            status = self.recvline(self.client)
+            if status.startswith("ERROR"):
+                return status
+            
+            # If OK, server sends size next
             temp = self.recvline(self.client)
-            if temp == ("error"):
-                return f"NO_FILE_FOUND_WITH_NAME-{filename}"
-            else:
-                size = int(temp)
+            if not temp:
+                return "ERROR: Server disconnected"
+            size = int(temp)
             
             downloads_folder = os.path.join(os.path.expanduser("~"), "Downloads")
-            os.makedirs(downloads_folder, exist_ok=True)  # create folder if missing
+            os.makedirs(downloads_folder, exist_ok=True)
             filepath = os.path.join(downloads_folder, filename)
 
-            received =0
+            received = 0
             with open(filepath,"wb") as f:
                 while received < size:
                     data = self.client.recv(min(1024, size - received))
+                    if not data: break
                     f.write(data)
                     received += len(data)
 
             return "DOWNLOAD_SUCCESS"
+        except Exception as e:
+            return f"ERROR: {str(e)}"
         finally:
             self.end_connection()
         
@@ -58,17 +66,22 @@ class FTPClient:
         try:
             filename = os.path.basename(str(filepath))
             size = str(os.path.getsize(filepath))
-            command = b"UPLOAD\n"
-
-            self.client.sendall(command)
+            
+            self.client.sendall(b"UPLOAD\n")
             self.client.sendall((filename + '\n').encode())
             self.client.sendall((size + '\n').encode())
 
+            # Handshake
+            status = self.recvline(self.client)
+            if status != "OK":
+                return status # Returns ERROR: <msg>
+
             with open(filepath, 'rb') as f:
-                while data := f.read(1024): # walrus operator, data equals the 1024 bytes from the file(or less) and simuntaniusly returns if data is empty
+                while data := f.read(1024):
                     self.client.sendall(data)
             return "UPLOAD_SUCCESS"
-        
+        except Exception as e:
+            return f"ERROR: {str(e)}"
         finally:
             self.end_connection()
 
