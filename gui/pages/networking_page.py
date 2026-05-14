@@ -122,9 +122,9 @@ class NetworkingPage(ctk.CTkFrame):
         self.detector_range_entry.grid(row=0, column=1, padx=5, pady=5)
 
         # Sniffer Section
-        ctk.CTkLabel(frame, text="Interface (e.g. Wi-Fi):").grid(row=1, column=0, padx=5, pady=5, sticky="e")
-        self.detector_interface_entry = ctk.CTkEntry(frame, width=150)
-        self.detector_interface_entry.grid(row=1, column=1, padx=5, pady=5)
+        ctk.CTkLabel(frame, text="Interface:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        self.detector_interface_dropdown = ctk.CTkOptionMenu(frame, values=config.get_interfaces(), width=150)
+        self.detector_interface_dropdown.grid(row=1, column=1, padx=5, pady=5)
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.grid(row=2, column=0, columnspan=2, pady=15)
@@ -158,13 +158,9 @@ class NetworkingPage(ctk.CTkFrame):
         threading.Thread(target=run_scan, daemon=True).start()
 
     def start_detector(self):
-        interface = self.detector_interface_entry.get()
+        interface = self.detector_interface_dropdown.get()
         if not interface:
             self.log("Error: Interface is required for the detector.")
-            return
-        
-        if interface not in config.KNOWN_INTERFACES:
-            self.log(f"Error: '{interface}' is not a recognized interface. Known: {config.KNOWN_INTERFACES}")
             return
 
         self.detector_stop_event.clear()
@@ -192,9 +188,9 @@ class NetworkingPage(ctk.CTkFrame):
         frame = ctk.CTkFrame(self.tab_sniffer, fg_color="transparent")
         frame.pack(pady=10)
 
-        ctk.CTkLabel(frame, text="Interface (e.g. Wi-Fi):").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        self.sniffer_interface_entry = ctk.CTkEntry(frame, width=150)
-        self.sniffer_interface_entry.grid(row=0, column=1, padx=5, pady=5)
+        ctk.CTkLabel(frame, text="Interface:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        self.sniffer_interface_dropdown = ctk.CTkOptionMenu(frame, values=config.get_interfaces(), width=150)
+        self.sniffer_interface_dropdown.grid(row=0, column=1, padx=5, pady=5)
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.grid(row=1, column=0, columnspan=2, pady=15)
@@ -206,13 +202,9 @@ class NetworkingPage(ctk.CTkFrame):
         self.sniffer_stop_btn.pack(side="left", padx=10)
 
     def start_sniffer(self):
-        interface = self.sniffer_interface_entry.get()
+        interface = self.sniffer_interface_dropdown.get()
         if not interface:
             self.log("Error: Interface is required for the sniffer.")
-            return
-
-        if interface not in config.KNOWN_INTERFACES:
-            self.log(f"Error: '{interface}' is not a recognized interface. Known: {config.KNOWN_INTERFACES}")
             return
 
         self.sniffer_stop_event.clear()

