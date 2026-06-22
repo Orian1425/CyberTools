@@ -5,13 +5,14 @@ from tkinter import filedialog, messagebox
 
 
 class FTPClient:
-    def __init__(self,host_ip: str, host_port: int):  
+    def __init__(self, host_port: int, broadcast_port: int = 50001):  
         self.is_connected = False
         self.error_message = ""
         try:
+            self.host_ip = discover_server_ip(broadcast_port)
             self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client.settimeout(3)
-            self.client.connect((host_ip, host_port))
+            self.client.connect((self.host_ip, host_port))
             self.is_connected = True
         except Exception as e:
             self.is_connected = False
@@ -90,3 +91,20 @@ class FTPClient:
         self.client.sendall(command)
         self.client.close()
 
+def discover_server_ip(broadcast_port: int = 50001, timeout: int = 10):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(('', broadcast_port))
+    sock.settimeout(timeout)
+    magic_token = b"Orian"
+    try:
+        while True:
+            data, addr = sock.recvfrom(1024)
+            if data == magic_token:
+                server_ip = addr[0]
+                print(f"Discovered server IP: {server_ip}")
+                return server_ip
+    except (socket.timeout, TimeoutError):
+        print("Server discovery timed out.")
+        return None
+    finally:
+        sock.close()

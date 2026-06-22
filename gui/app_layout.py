@@ -7,6 +7,7 @@ from gui.pages.physics_page import PhysicsPage
 from gui.pages.physics_hub_page import PhysicsHubPage
 from gui.pages.snells_law_page import SnellsLawPage
 from gui.pages.networking_page import NetworkingPage
+from gui.pages.rdp_page import RDPPage
 
 # הגדרת מראה האפליקציה 
 ctk.set_appearance_mode(config.APPEARANCE_MODE)
@@ -48,6 +49,9 @@ class CyberAppGUI(ctk.CTk):
         self.networking_btn = ctk.CTkButton(self.sidebar, text="Networking Tools", command=lambda: self.show_page("Networking"))
         self.networking_btn.pack(pady=10, padx=10)
 
+        self.rdp_btn = ctk.CTkButton(self.sidebar, text="RDP Tool", command=lambda: self.show_page("RDP"))
+        self.rdp_btn.pack(pady=10, padx=10)
+
         self.settings_btn = ctk.CTkButton(self.sidebar, text="Settings", command=lambda: self.show_page("Settings"), fg_color="gray")
         self.settings_btn.pack(side="bottom", pady=20, padx=10)
 
@@ -70,6 +74,8 @@ class CyberAppGUI(ctk.CTk):
             self.current_page = SnellsLawPage(self.container)
         elif page_name == "Networking":
             self.current_page = NetworkingPage(self.container)
+        elif page_name == "RDP":
+            self.current_page = RDPPage(self.container)
         elif page_name == "Settings":
             self.current_page = SettingsPage(self.container)
         

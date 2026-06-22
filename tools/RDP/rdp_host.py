@@ -23,9 +23,10 @@ class MouseListener:
 
 
 class KeyboardListener:
-    def __init__(self, q: queue.Queue):
+    def __init__(self, q: queue.Queue, shutdown_callback=None):
         self.q = q
         self.ctrl_pressed = False
+        self.shutdown_callback = shutdown_callback
         self.listner = keyboard.Listener(
             on_press=self.on_press,
             on_release=self.on_release
@@ -43,8 +44,11 @@ class KeyboardListener:
 
         # 2. Check if Escape is pressed WHILE Control is being held down
         if key == keyboard.Key.esc and self.ctrl_pressed:
-            print("Ctrl + Esc detected! Shutting down server application...")
-            os._exit(0)
+            print("Ctrl + Esc detected! Shutting down RDP session...")
+            if self.shutdown_callback:
+                self.shutdown_callback()
+            else:
+                os._exit(0)
 
     def on_release(self, key, injected = False):
         print(f"{key} released")
@@ -57,80 +61,111 @@ class KeyboardListener:
         self.listner.start()
 
 class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
-    def __init__(self, addr: str, port: int):
+    def __init__(self, addr: str, port: int, shutdown_callback=None):
+        self.addr = addr
+        self.port = port
+        self.shutdown_callback = shutdown_callback
+        
+        self.output_socket = None
+        self.input_socket = None
+        self.con = None
+        self.q = None
+        self.mouse_listener = None
+        self.kb_listener = None
+        self.last_frame = None
+        self.is_running = False
+        self.input_thread = None
+        self.video_thread = None
+
+    def start(self):
+        self.is_running = True
         self.output_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.output_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.output_socket.bind((addr,port))
+        self.output_socket.bind((self.addr, self.port))
         self.output_socket.listen()
-        self.con, self.client_addr = self.output_socket.accept()
         
+        # Accept connection without blocking indefinitely so we can stop if needed
+        self.output_socket.settimeout(1.0)
+        while self.is_running:
+            try:
+                self.con, self.client_addr = self.output_socket.accept()
+                break
+            except socket.timeout:
+                continue
+            except Exception:
+                return False
+
+        if not self.is_running:
+            return False
+
         self.input_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.input_socket.bind((addr, port))
+        self.input_socket.bind((self.addr, self.port))
 
         self.q = queue.Queue()
 
         self.mouse_listener = MouseListener(self.q)
-        self.kb_listener = KeyboardListener(self.q)
+        self.kb_listener = KeyboardListener(self.q, self.shutdown_callback)
 
-        self.last_frame = None
+        self.start_input_capture()
+        self.input_thread = threading.Thread(target=self.handling_KB_and_mouse_data, args=(self.con,), daemon=True)
+        self.input_thread.start()
+
+        # Start the network listener in the background
+        self.video_thread = threading.Thread(target=self.network_video_packet_listener, daemon=True)
+        self.video_thread.start()
+        
+        # Start the GUI loop
+        self.gui_loop()
+        return True
      
     def start_input_capture(self):
         self.mouse_listener.start_listening()
         self.kb_listener.start_listening()
-       
-    def start_sending_data(self):
-        self.start_input_capture()
-
-        input_thread = threading.Thread(target=self.handling_KB_and_mouse_data,args=(self.con,))
-        
-        input_thread.start()
-        
-        return input_thread
 
     def handling_KB_and_mouse_data(self, con: socket.socket):
-        while True:
+        while self.is_running:
             try:
-                data = self.q.get()
+                try:
+                    data = self.q.get(timeout=1.0)
+                except queue.Empty:
+                    continue
                 con.sendall(f"{data}\n".encode())
                 self.q.task_done()
             except Exception as e:
                 print(f"Connection lost: {e}")
                 break
 
-    def receive_screen_share(self):
-        # 1. Start the network listener in the background
-        # We set daemon=True so the thread dies safely when you close the app
-        video_thread = threading.Thread(target=self.network_video_packet_listener, daemon=True)
-        video_thread.start()
-        
-        # 2. Start the GUI loop on the MAIN thread
-        self.gui_loop()
-
     def gui_loop(self):
-        """Runs on the main thread. Only handles displaying the video."""
-        # Create the window once before the loop starts
+        """Runs on the RDP thread. Only handles displaying the video."""
         cv2.namedWindow('Screen Recording', cv2.WINDOW_NORMAL)
         cv2.setWindowProperty('Screen Recording', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-        while True:
+        while self.is_running:
             # If the background thread has provided a frame, show it
             if self.last_frame is not None:
                 cv2.imshow('Screen Recording', self.last_frame)
-            cv2.waitKey(1)
+            if cv2.waitKey(1) & 0xFF == 27: # Esc key
+                break
                 
         cv2.destroyAllWindows()
     
 
     def network_video_packet_listener(self):
         frame_buffer = {}
-        while True:
-            packet, addr = self.input_socket.recvfrom(65535)
+        self.input_socket.settimeout(1.0)
+        while self.is_running:
+            try:
+                packet, addr = self.input_socket.recvfrom(65535)
+            except socket.timeout:
+                continue
+            except Exception:
+                break
 
             header = packet[:6]
             chunk_data = packet[6:]
 
             frame_id, chunk_id, total_chunks = struct.unpack('I B B', header)
             if frame_id not in frame_buffer:
-                frame_buffer[frame_id] = [None] * total_chunks # initialize item in list for every chunk [None,None,None,None...]
+                frame_buffer[frame_id] = [None] * total_chunks # initialize item in list for every chunk
             frame_buffer[frame_id][chunk_id] = chunk_data
 
             if None not in frame_buffer[frame_id]: # all chunks have the data
@@ -144,8 +179,46 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
 
                 del frame_buffer[frame_id]
 
+    def stop(self):
+        self.is_running = False
+        
+        # Stop pynput listeners
+        if self.mouse_listener and hasattr(self.mouse_listener, 'listener'):
+            try:
+                self.mouse_listener.listener.stop()
+            except Exception:
+                pass
+        if self.kb_listener and hasattr(self.kb_listener, 'listner'):
+            try:
+                self.kb_listener.listner.stop()
+            except Exception:
+                pass
+
+        # Close sockets
+        if self.con:
+            try:
+                self.con.close()
+            except Exception:
+                pass
+        if self.output_socket:
+            try:
+                self.output_socket.close()
+            except Exception:
+                pass
+        if self.input_socket:
+            try:
+                self.input_socket.close()
+            except Exception:
+                pass
+
+        # Destroy CV2 windows
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+
             
-def broadcast_presence(broadcast_port=50001):
+def broadcast_presence(stop_event: threading.Event, broadcast_port: int = 50001):
     # Create a UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -153,19 +226,40 @@ def broadcast_presence(broadcast_port=50001):
     # Unique token so your client knows it's actually your server
     magic_token = b"Orian" 
     
-    print("Broadcasting server presence to the LAN...")
+    print(f"Broadcasting server presence to the LAN on port {broadcast_port}...")
     try:
-        while True:
+        while not stop_event.is_set():
             # Broadcast the token to everyone on the local subnet
             sock.sendto(magic_token, ('<broadcast>', broadcast_port))
-            time.sleep(3)  # Announce every 3 seconds
-    except KeyboardInterrupt:
-        print("Stopping broadcast.")
+            # Sleep in short intervals so we can exit quickly
+            for _ in range(30):
+                if stop_event.is_set():
+                    break
+                time.sleep(0.1)
+    except Exception as e:
+        print(f"Stopping broadcast due to: {e}")
     finally:
         sock.close()
 
-t = threading.Thread(target=broadcast_presence)
-t.start()
-host = Host("0.0.0.0", 7777)
-thread = host.start_sending_data()
-host.receive_screen_share()
+
+if __name__ == "__main__":
+    try:
+        import config
+        rdp_port = config.PORTS.get("RDP", 7777)
+        broadcast_port = config.PORTS.get("Broadcast", 50001)
+    except ImportError:
+        rdp_port = 7777
+        broadcast_port = 50001
+
+    stop_event = threading.Event()
+    t = threading.Thread(target=broadcast_presence, args=(stop_event, broadcast_port), daemon=True)
+    t.start()
+    
+    host = Host("0.0.0.0", rdp_port)
+    try:
+        host.start()
+    except KeyboardInterrupt:
+        print("Stopping host...")
+    finally:
+        stop_event.set()
+        host.stop()

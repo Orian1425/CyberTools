@@ -98,7 +98,7 @@ class FTPPage(ctk.CTkFrame):
             self.log(f"Initiating upload: {filename}")
             
             def run_upload():
-                client = FTPClient(config.HOST_IP, config.PORTS["FTP"])
+                client = FTPClient(config.PORTS["FTP"], config.PORTS["Broadcast"])
                 if client.is_connected:
                     status = client.upload_file_to_server(path)
                     self.log(f"Upload Status: {status}")
@@ -113,7 +113,7 @@ class FTPPage(ctk.CTkFrame):
             self.log(f"Initiating download: {filename}")
             
             def run_download():
-                client = FTPClient(config.HOST_IP, config.PORTS["FTP"])
+                client = FTPClient(config.PORTS["FTP"], config.PORTS["Broadcast"])
                 if client.is_connected:
                     status = client.download_file_to_client(filename)
                     self.log(f"Download Status: {status}")

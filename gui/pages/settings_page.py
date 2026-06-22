@@ -9,13 +9,6 @@ class SettingsPage(ctk.CTkFrame):
         self.label = ctk.CTkLabel(self, text="Application Settings", font=("Roboto", 24, "bold"))
         self.label.pack(pady=20)
 
-        # הגדרת IP של השרת
-        self.ip_label = ctk.CTkLabel(self, text="Server IP Address:")
-        self.ip_label.pack(pady=5)
-        self.ip_entry = ctk.CTkEntry(self, width=250)
-        self.ip_entry.insert(0, config.HOST_IP) # מציג את הערך הנוכחי מ-config
-        self.ip_entry.pack(pady=5)
-
         # הגדרת יעד Keylogger
         self.keylogger_label = ctk.CTkLabel(self, text="Keylogger Destination:")
         self.keylogger_label.pack(pady=5)
@@ -50,7 +43,6 @@ class SettingsPage(ctk.CTkFrame):
         self.save_btn.pack(pady=20)
 
     def save_settings(self):
-        config.HOST_IP = self.ip_entry.get()
         config.KEYLOGGER_DESTINATION = self.keylogger_entry.get()
 
         # 2. עדכון כל הפורטים בלולאה
@@ -62,4 +54,4 @@ class SettingsPage(ctk.CTkFrame):
                 print(f"Invalid port for {service_name}")
 
         print("Settings saved successfully!")
-        print(f"New Config: IP={config.HOST_IP}, KeyloggerDest={config.KEYLOGGER_DESTINATION}, Ports={config.PORTS}")
+        print(f"New Config: KeyloggerDest={config.KEYLOGGER_DESTINATION}, Ports={config.PORTS}")

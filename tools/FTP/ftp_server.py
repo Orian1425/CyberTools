@@ -1,3 +1,4 @@
+import time
 import socket
 import threading
 import os
@@ -10,7 +11,17 @@ class FTPServer:
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.folder = config.SERVER_STORAGE
         
+        self.broadcast_stop_event = threading.Event()
+        
         try:
+            broadcast_port = config.PORTS["Broadcast"]
+            self.broadcast_presence_thread = threading.Thread(
+                target=broadcast_presence,
+                args=(self.broadcast_stop_event, broadcast_port),
+                daemon=True
+            )
+            self.broadcast_presence_thread.start()
+
             self.server.bind((addr, port))
             self.server.listen()
             self.log(f"[*] Server listening on {addr}:{port}")
@@ -130,6 +141,28 @@ class FTPServer:
     def stop_server(self):
         """Graceful server shutdown"""
         self.log("[*] FTP Server stopped.\n")
+        self.broadcast_stop_event.set()
         self.server.close()
 
 
+def broadcast_presence(stop_event: threading.Event, broadcast_port: int):
+    # Create a UDP socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    
+    # Unique token so your client knows it's actually your server
+    magic_token = b"Orian" 
+    
+    print(f"Broadcasting server presence to the LAN on port {broadcast_port}...")
+    try:
+        while not stop_event.is_set():
+            # Broadcast the token to everyone on the local subnet
+            sock.sendto(magic_token, ('<broadcast>', broadcast_port))
+            for _ in range(30):
+                if stop_event.is_set():
+                    break
+                time.sleep(0.1)
+    except Exception as e:
+        print(f"Stopping broadcast due to: {e}")
+    finally:
+        sock.close()

@@ -47,18 +47,26 @@ class Client:
         
         self.mouse = MouseController()
         self.keyboard = KeyboardController()
+        self.is_running = True
     
     def get_commands(self):
         buffer = ""
-        while True:
-            data = self.input_socket.recv(1024).decode()
-            # if not data:
-            #     break
-            buffer += data
-            while "\n" in buffer:
-                command, buffer = buffer.split("\n", 1)
-                if command.strip():
-                    self.execute_command(command.strip())
+        self.input_socket.settimeout(1.0)
+        while self.is_running:
+            try:
+                data = self.input_socket.recv(1024).decode()
+                if not data:
+                    break
+                buffer += data
+                while "\n" in buffer:
+                    command, buffer = buffer.split("\n", 1)
+                    if command.strip():
+                        self.execute_command(command.strip())
+            except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"Error receiving commands: {e}")
+                break
 
     def execute_command(self, command: str):
         command_parts = command.split(":")
@@ -131,6 +139,7 @@ class Client:
     def start_screen_record(self):
         #con, addr = self.socket.accept()
         video_capture_thread = threading.Thread(target=self.handle_screen_record, args = (self.video_socket,self.udp_target_addr,))
+        video_capture_thread.daemon = True
         video_capture_thread.start()
         return video_capture_thread
     
@@ -146,26 +155,43 @@ class Client:
         sct = mss.MSS()
         monitor = sct.monitors[1]
         frame_id = 0
-        while True:
-            img_raw = np.array(sct.grab(monitor))
-            # Convert BGRA to BGR (removes the alpha channel to save data)
-            img_bgr = cv2.cvtColor(img_raw, cv2.COLOR_BGRA2BGR)
-            self.draw_mouse(monitor, img_bgr)
-            #compress to jpeg
-            encode_paramaters = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
-            _ , encoded_img = cv2.imencode('.jpg',img_bgr,encode_paramaters)
-            data = encoded_img.tobytes()
+        while self.is_running:
+            try:
+                img_raw = np.array(sct.grab(monitor))
+                # Convert BGRA to BGR (removes the alpha channel to save data)
+                img_bgr = cv2.cvtColor(img_raw, cv2.COLOR_BGRA2BGR)
+                self.draw_mouse(monitor, img_bgr)
+                #compress to jpeg
+                encode_paramaters = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+                _ , encoded_img = cv2.imencode('.jpg',img_bgr,encode_paramaters)
+                data = encoded_img.tobytes()
 
-            data_size = len(data)
-            total_chunks = math.ceil(data_size / MAX_IMAGE_DGRAM) # how many packets will be needed to send
-            for i in range(total_chunks):
-                start = i * MAX_IMAGE_DGRAM
-                end = min((i+1) * MAX_IMAGE_DGRAM, data_size)
-                chunk_data = data[start:end]
+                data_size = len(data)
+                total_chunks = math.ceil(data_size / MAX_IMAGE_DGRAM) # how many packets will be needed to send
+                for i in range(total_chunks):
+                    if not self.is_running:
+                        break
+                    start = i * MAX_IMAGE_DGRAM
+                    end = min((i+1) * MAX_IMAGE_DGRAM, data_size)
+                    chunk_data = data[start:end]
 
-                header = struct.pack("I B B", frame_id % UNSIGNED_INT_MAX_VALUE, i, total_chunks)# frame id, chunk id, chunk total
-                con.sendto(header + chunk_data, target_addr)
-            frame_id += 1
+                    header = struct.pack("I B B", frame_id % UNSIGNED_INT_MAX_VALUE, i, total_chunks)# frame id, chunk id, chunk total
+                    con.sendto(header + chunk_data, target_addr)
+                frame_id += 1
+            except Exception as e:
+                print(f"Error capturing or sending screen: {e}")
+                break
+
+    def stop(self):
+        self.is_running = False
+        try:
+            self.input_socket.close()
+        except Exception:
+            pass
+        try:
+            self.video_socket.close()
+        except Exception:
+            pass
 
 def discover_server_ip(broadcast_port: int = 50001, timeout: int = 10):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -179,19 +205,26 @@ def discover_server_ip(broadcast_port: int = 50001, timeout: int = 10):
                 server_ip = addr[0]
                 print(f"Discovered server IP: {server_ip}")
                 return server_ip
-    except TimeoutError:
+    except (socket.timeout, TimeoutError):
         print("Server discovery timed out.")
         return None
     finally:
         sock.close()
         
-server_ip = discover_server_ip()
-if server_ip is None:
-    print("Could not discover server IP. Exiting.")
-    sys.exit(1)
-    
-    
-client = Client(server_ip, 7777)
-
-# thread = client.start_screen_record()
-# client.get_commands()
+if __name__ == "__main__":
+    try:
+        import config
+        rdp_port = config.PORTS.get("RDP", 7777)
+        broadcast_port = config.PORTS.get("Broadcast", 50001)
+    except ImportError:
+        rdp_port = 7777
+        broadcast_port = 50001
+        
+    server_ip = discover_server_ip(broadcast_port)
+    if server_ip is None:
+        print("Could not discover server IP. Exiting.")
+        sys.exit(1)
+        
+    client = Client(server_ip, rdp_port)
+    client.start_screen_record()
+    client.get_commands()
