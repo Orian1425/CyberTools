@@ -6,4 +6,4 @@ A Python-based GUI application for self built cybersecurity tools.
 
 ## Installation
 1. `pip install -r requirements.txt`
-2. `python main.py`
+2. `py main.py`
