@@ -6,8 +6,8 @@ import subprocess
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import config
-from tools.RDP.rdp_host import Host, broadcast_presence
-from tools.RDP.rdp_client import Client, discover_server_ip
+from tools.RDP.rdp_host import Host
+from tools.RDP.rdp_client import Client
 
 class RDPPage(ctk.CTkFrame):
     def __init__(self, master):
@@ -121,19 +121,20 @@ class RDPPage(ctk.CTkFrame):
 
         rdp_port = config.PORTS["RDP"]
         broadcast_port = config.PORTS["Broadcast"]
-
-        # 1. Start broadcast presence
-        self.broadcast_stop_event.clear()
+        
+        self.host_instance = Host("0.0.0.0", rdp_port, shutdown_callback=self.stop_host_from_keypress, log_callback=self.log)
+        
+        # 1. Start broadcast presence   
+        self.broadcast_stop_event.clear() 
         self.broadcast_thread = threading.Thread(
-            target=broadcast_presence,
-            args=(self.broadcast_stop_event, broadcast_port),
+            target=Host.broadcast_presence,
+            args=(self.broadcast_stop_event, broadcast_port,self.log),
             daemon=True
         )
         self.broadcast_thread.start()
         self.log(f"Broadcasting server presence on port {broadcast_port}...")
 
         # 2. Start Host listener
-        self.host_instance = Host("0.0.0.0", rdp_port, shutdown_callback=self.stop_host_from_keypress)
         
         def run_host():
             self.log(f"Listening for RDP Client connection on port {rdp_port}...")
@@ -173,7 +174,7 @@ class RDPPage(ctk.CTkFrame):
         broadcast_port = config.PORTS["Broadcast"]
 
         def run_client():
-            server_ip = discover_server_ip(broadcast_port, timeout=5)
+            server_ip = Client.discover_server_ip(broadcast_port, timeout=5, log_callback=self.log)
             if not server_ip:
                 self.log("Error: Could not discover any RDP Host Server on the LAN.")
                 self.after(0, self.stop_client)
@@ -181,7 +182,7 @@ class RDPPage(ctk.CTkFrame):
 
             self.log(f"Discovered Host Server IP: {server_ip}. Connecting on port {rdp_port}...")
             try:
-                self.client_instance = Client(server_ip, rdp_port)
+                self.client_instance = Client(server_ip, rdp_port, log_callback=self.log)
                 self.log("Connected to Host. Streaming screen recording...")
                 self.client_instance.is_running = True
                 

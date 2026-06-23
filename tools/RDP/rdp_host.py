@@ -33,10 +33,6 @@ class KeyboardListener:
         )
 
     def on_press(self, key, injected = False):
-        try:
-            print(f"{key} pressed")
-        except AttributeError:
-            print(f"special key {key} pressed")
         self.q.put(f"K:P:{key}")
 
         if key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
@@ -44,14 +40,12 @@ class KeyboardListener:
 
         # 2. Check if Escape is pressed WHILE Control is being held down
         if key == keyboard.Key.esc and self.ctrl_pressed:
-            print("Ctrl + Esc detected! Shutting down RDP session...")
             if self.shutdown_callback:
                 self.shutdown_callback()
             else:
                 os._exit(0)
 
     def on_release(self, key, injected = False):
-        print(f"{key} released")
         self.q.put(f"K:R:{key}")
 
         if key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
@@ -61,34 +55,37 @@ class KeyboardListener:
         self.listner.start()
 
 class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
-    def __init__(self, addr: str, port: int, shutdown_callback=None):
+    def __init__(self, addr: str, port: int, shutdown_callback=None, log_callback=None):
         self.addr = addr
         self.port = port
         self.shutdown_callback = shutdown_callback
+        self.log = log_callback or print
         
-        self.output_socket = None
-        self.input_socket = None
-        self.con = None
+        self.kb_mouse_socket = None
+        self.video_socket = None
+        self.kb_mouse_con = None
+
         self.q = None
         self.mouse_listener = None
         self.kb_listener = None
+
         self.last_frame = None
         self.is_running = False
-        self.input_thread = None
+        self.kb_mouse_thread = None
         self.video_thread = None
 
     def start(self):
         self.is_running = True
-        self.output_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.output_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.output_socket.bind((self.addr, self.port))
-        self.output_socket.listen()
+        self.kb_mouse_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.kb_mouse_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.kb_mouse_socket.bind((self.addr, self.port))
+        self.kb_mouse_socket.listen()
         
         # Accept connection without blocking indefinitely so we can stop if needed
-        self.output_socket.settimeout(1.0)
+        self.kb_mouse_socket.settimeout(1.0)
         while self.is_running:
             try:
-                self.con, self.client_addr = self.output_socket.accept()
+                self.kb_mouse_con, self.client_addr = self.kb_mouse_socket.accept()
                 break
             except socket.timeout:
                 continue
@@ -98,17 +95,14 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
         if not self.is_running:
             return False
 
-        self.input_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.input_socket.bind((self.addr, self.port))
-
         self.q = queue.Queue()
 
         self.mouse_listener = MouseListener(self.q)
         self.kb_listener = KeyboardListener(self.q, self.shutdown_callback)
 
         self.start_input_capture()
-        self.input_thread = threading.Thread(target=self.handling_KB_and_mouse_data, args=(self.con,), daemon=True)
-        self.input_thread.start()
+        self.kb_mouse_thread = threading.Thread(target=self.handling_KB_and_mouse_data, args=(self.kb_mouse_con,), daemon=True)
+        self.kb_mouse_thread.start()
 
         # Start the network listener in the background
         self.video_thread = threading.Thread(target=self.network_video_packet_listener, daemon=True)
@@ -132,7 +126,7 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
                 con.sendall(f"{data}\n".encode())
                 self.q.task_done()
             except Exception as e:
-                print(f"Connection lost: {e}")
+                self.log(f"Connection lost: {e}")
                 break
 
     def gui_loop(self):
@@ -151,10 +145,10 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
 
     def network_video_packet_listener(self):
         frame_buffer = {}
-        self.input_socket.settimeout(1.0)
+        self.video_socket.settimeout(1.0)
         while self.is_running:
             try:
-                packet, addr = self.input_socket.recvfrom(65535)
+                packet, addr = self.video_socket.recvfrom(65535)
             except socket.timeout:
                 continue
             except Exception:
@@ -188,26 +182,26 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
                 self.mouse_listener.listener.stop()
             except Exception:
                 pass
-        if self.kb_listener and hasattr(self.kb_listener, 'listner'):
+        if self.kb_listener and hasattr(self.kb_listener, 'listener'):
             try:
-                self.kb_listener.listner.stop()
+                self.kb_listener.listener.stop()
             except Exception:
                 pass
 
         # Close sockets
-        if self.con:
+        if self.kb_mouse_con:
             try:
-                self.con.close()
+                self.kb_mouse_con.close()
             except Exception:
                 pass
-        if self.output_socket:
+        if self.kb_mouse_socket:
             try:
-                self.output_socket.close()
+                self.kb_mouse_socket.close()
             except Exception:
                 pass
-        if self.input_socket:
+        if self.video_socket:
             try:
-                self.input_socket.close()
+                self.video_socket.close()
             except Exception:
                 pass
 
@@ -217,49 +211,53 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
         except Exception:
             pass
 
+    @staticmethod
+    def broadcast_presence(stop_event: threading.Event, broadcast_port: int = 50001, log_callback=None):
+        if log_callback is None:
+            log_callback = print
+        # Create a UDP socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # Unique token so your client knows it's actually your server
+        magic_token = b"Orian" 
+        
+        try:
+            while not stop_event.is_set():
+                # Broadcast the token to everyone on the local subnet
+                sock.sendto(magic_token, ('<broadcast>', broadcast_port))
+                # Sleep in short intervals so we can exit quickly
+                for _ in range(30):
+                    if stop_event.is_set():
+                        break
+                    time.sleep(0.1)
+        except Exception as e:
+            log_callback(f"Stopping broadcast due to: {e}")
+        finally:
+            sock.close()
+
+
             
-def broadcast_presence(stop_event: threading.Event, broadcast_port: int = 50001):
-    # Create a UDP socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    
-    # Unique token so your client knows it's actually your server
-    magic_token = b"Orian" 
-    
-    print(f"Broadcasting server presence to the LAN on port {broadcast_port}...")
-    try:
-        while not stop_event.is_set():
-            # Broadcast the token to everyone on the local subnet
-            sock.sendto(magic_token, ('<broadcast>', broadcast_port))
-            # Sleep in short intervals so we can exit quickly
-            for _ in range(30):
-                if stop_event.is_set():
-                    break
-                time.sleep(0.1)
-    except Exception as e:
-        print(f"Stopping broadcast due to: {e}")
-    finally:
-        sock.close()
 
 
-if __name__ == "__main__":
-    try:
-        import config
-        rdp_port = config.PORTS.get("RDP", 7777)
-        broadcast_port = config.PORTS.get("Broadcast", 50001)
-    except ImportError:
-        rdp_port = 7777
-        broadcast_port = 50001
+# if __name__ == "__main__":
+#     try:
+#         import config
+#         rdp_port = config.PORTS.get("RDP", 7777)
+#         broadcast_port = config.PORTS.get("Broadcast", 50001)
+#     except ImportError:
+#         rdp_port = 7777
+#         broadcast_port = 50001
 
-    stop_event = threading.Event()
-    t = threading.Thread(target=broadcast_presence, args=(stop_event, broadcast_port), daemon=True)
-    t.start()
+#     stop_event = threading.Event()
+#     t = threading.Thread(target=broadcast_presence, args=(stop_event, broadcast_port), daemon=True)
+#     t.start()
     
-    host = Host("0.0.0.0", rdp_port)
-    try:
-        host.start()
-    except KeyboardInterrupt:
-        print("Stopping host...")
-    finally:
-        stop_event.set()
-        host.stop()
+#     host = Host("0.0.0.0", rdp_port)
+#     try:
+#         host.start()
+#     except KeyboardInterrupt:
+#         print("Stopping host...")
+#     finally:
+#         stop_event.set()
+#         host.stop()

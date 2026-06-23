@@ -38,9 +38,10 @@ UNSIGNED_INT_MAX_VALUE = 4294967295
 
 
 class Client:
-    def __init__(self, dest_ip: str, dest_port: int):  
-        self.input_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.input_socket.connect((dest_ip, dest_port))
+    def __init__(self, dest_ip: str, dest_port: int, log_callback = None):  
+        self.log = log_callback or print
+        self.kb_mouse_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.kb_mouse_socket.connect((dest_ip, dest_port))
 
         self.video_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_target_addr = (dest_ip, dest_port)
@@ -51,10 +52,10 @@ class Client:
     
     def get_commands(self):
         buffer = ""
-        self.input_socket.settimeout(1.0)
+        self.kb_mouse_socket.settimeout(1.0)
         while self.is_running:
             try:
-                data = self.input_socket.recv(1024).decode()
+                data = self.kb_mouse_socket.recv(1024).decode()
                 if not data:
                     break
                 buffer += data
@@ -65,7 +66,7 @@ class Client:
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"Error receiving commands: {e}")
+                self.log(f"Error receiving commands: {e}")
                 break
 
     def execute_command(self, command: str):
@@ -98,18 +99,18 @@ class Client:
                     self.keyboard.release(key_object)
                 time.sleep(0.01)
             except Exception as e:
-                print(f"Error processing key command: {e}")
-                print(f"Raw key: {command_parts[2]}, Key object: {key_object}")
+                self.log(f"Error processing key command: {e}")
+                self.log(f"Raw key: {command_parts[2]}, Key object: {key_object}")
                 
         elif command_type == 'S':
             try:
                 dy = int(command_parts[1])
             except:
-                print(f"{dy} not valid number")
+                self.log(f"{dy} not valid number")
             try:
                 dx = int(command_parts[2])
             except:
-                print(f"{dx} not valid number")
+                self.log(f"{dx} not valid number")
             self.mouse.scroll(dy, dx)
 
         
@@ -185,7 +186,7 @@ class Client:
     def stop(self):
         self.is_running = False
         try:
-            self.input_socket.close()
+            self.kb_mouse_socket.close()
         except Exception:
             pass
         try:
@@ -193,38 +194,41 @@ class Client:
         except Exception:
             pass
 
-def discover_server_ip(broadcast_port: int = 50001, timeout: int = 10):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', broadcast_port))
-    sock.settimeout(timeout)
-    magic_token = b"Orian"
-    try:
-        while True:
-            data, addr = sock.recvfrom(1024)
-            if data == magic_token:
-                server_ip = addr[0]
-                print(f"Discovered server IP: {server_ip}")
-                return server_ip
-    except (socket.timeout, TimeoutError):
-        print("Server discovery timed out.")
-        return None
-    finally:
-        sock.close()
+    @staticmethod
+    def discover_server_ip(broadcast_port: int = 50001, timeout: int = 10, log_callback = None):
+        if log_callback is None:
+            log_callback = print
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(('', broadcast_port))
+        sock.settimeout(timeout)
+        magic_token = b"Orian"
+        try:
+            while True:
+                data, addr = sock.recvfrom(1024)
+                if data == magic_token:
+                    server_ip = addr[0]
+                    log_callback(f"Discovered server IP: {server_ip}")
+                    return server_ip
+        except (socket.timeout, TimeoutError):
+            log_callback("Server discovery timed out.")
+            return None
+        finally:
+            sock.close()
         
-if __name__ == "__main__":
-    try:
-        import config
-        rdp_port = config.PORTS.get("RDP", 7777)
-        broadcast_port = config.PORTS.get("Broadcast", 50001)
-    except ImportError:
-        rdp_port = 7777
-        broadcast_port = 50001
+# if __name__ == "__main__":
+#     try:
+#         import config
+#         rdp_port = config.PORTS.get("RDP", 7777)
+#         broadcast_port = config.PORTS.get("Broadcast", 50001)
+#     except ImportError:
+#         rdp_port = 7777
+#         broadcast_port = 50001
         
-    server_ip = discover_server_ip(broadcast_port)
-    if server_ip is None:
-        print("Could not discover server IP. Exiting.")
-        sys.exit(1)
+#     server_ip = discover_server_ip(broadcast_port)
+#     if server_ip is None:
+#         print("Could not discover server IP. Exiting.")
+#         sys.exit(1)
         
-    client = Client(server_ip, rdp_port)
-    client.start_screen_record()
-    client.get_commands()
+#     client = Client(server_ip, rdp_port)
+#     client.start_screen_record()
+#     client.get_commands()
