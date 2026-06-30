@@ -1,58 +1,5 @@
 import os, queue, socket, threading, time, cv2, numpy as np, struct
-from pynput import mouse, keyboard  
-
-class MouseListener:
-    def __init__(self,q: queue.Queue):
-        self.q = q
-        self.listener = mouse.Listener(
-            on_move=self.on_move, 
-            on_click=self.on_click,
-            on_scroll=self.on_scroll
-        )
-    def on_move(self, x, y, injected = False):
-        self.q.put(f"M:{x}:{y}")
-    
-    def on_click(self, x, y, button, pressed, injected = False):
-        self.q.put(f"C:{'P' if pressed else 'R'}:{button}:{x}:{y}")
-
-    def on_scroll(self, x, y, dx, dy, injected = False):
-        self.q.put(f"S:{dy}:{dx}")
-
-    def start_listening(self):
-        self.listener.start()
-
-
-class KeyboardListener:
-    def __init__(self, q: queue.Queue, shutdown_callback=None):
-        self.q = q
-        self.ctrl_pressed = False
-        self.shutdown_callback = shutdown_callback
-        self.listner = keyboard.Listener(
-            on_press=self.on_press,
-            on_release=self.on_release
-        )
-
-    def on_press(self, key, injected = False):
-        self.q.put(f"K:P:{key}")
-
-        if key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
-            self.ctrl_pressed = True
-
-        # 2. Check if Escape is pressed WHILE Control is being held down
-        if key == keyboard.Key.esc and self.ctrl_pressed:
-            if self.shutdown_callback:
-                self.shutdown_callback()
-            else:
-                os._exit(0)
-
-    def on_release(self, key, injected = False):
-        self.q.put(f"K:R:{key}")
-
-        if key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
-            self.ctrl_pressed = False
-        
-    def start_listening(self):
-        self.listner.start()
+from tools.RDP.listeners import MouseListener, KeyboardListener
 
 class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
     def __init__(self, addr: str, port: int, shutdown_callback=None, log_callback=None):
@@ -92,6 +39,9 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
             except Exception:
                 return False
 
+        self.video_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.video_socket.bind((self.addr, self.port))
+
         if not self.is_running:
             return False
 
@@ -127,6 +77,7 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
                 self.q.task_done()
             except Exception as e:
                 self.log(f"Connection lost: {e}")
+                self.stop()
                 break
 
     def gui_loop(self):
@@ -137,9 +88,10 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
             # If the background thread has provided a frame, show it
             if self.last_frame is not None:
                 cv2.imshow('Screen Recording', self.last_frame)
-            if cv2.waitKey(1) & 0xFF == 27: # Esc key
+            
+            if cv2.waitKey(1) == ord('q') and self.kb_listener.is_ctrl_pressed():
+                self.stop()
                 break
-                
         cv2.destroyAllWindows()
     
 
@@ -152,6 +104,7 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
             except socket.timeout:
                 continue
             except Exception:
+                self.stop()
                 break
 
             header = packet[:6]
@@ -177,12 +130,12 @@ class Host: # Protocol - k:a - keyboard, M:10,10 - mouse coords, B:mouse buttons
         self.is_running = False
         
         # Stop pynput listeners
-        if self.mouse_listener and hasattr(self.mouse_listener, 'listener'):
+        if self.mouse_listener:
             try:
                 self.mouse_listener.listener.stop()
             except Exception:
                 pass
-        if self.kb_listener and hasattr(self.kb_listener, 'listener'):
+        if self.kb_listener:
             try:
                 self.kb_listener.listener.stop()
             except Exception:

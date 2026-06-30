@@ -1,36 +1,6 @@
 import math, re, socket, struct, threading, time, cv2, numpy as np
 from mss import mss
-from pynput import mouse, keyboard
-import sys
-    
-class MouseController:
-    def __init__(self):
-        self.controller = mouse.Controller()
-
-    def set_position(self, x, y):
-        self.controller.position = (x,y)
-
-    def press(self, button: mouse.Button):
-        self.controller.press(button=button)
-
-    def release(self, button: mouse.Button):
-        self.controller.release(button=button)
-
-    def scroll(self, dy: int, dx: int):
-        self.controller.scroll(dx, dy)
-
-class KeyboardController:
-    def __init__(self):
-        self.controller = keyboard.Controller()
-
-    def press(self, key: keyboard.Key):
-        self.controller.press(key)
-
-    def release(self, key: keyboard.Key):
-        self.controller.release(key)
-
-    def type(self, text: str):
-        self.controller.type(text)
+from tools.RDP.controllers import MouseController as mouse, KeyboardController as keyboard
 
 
 MAX_IMAGE_DGRAM = 60000  #max is 65,535 
@@ -46,8 +16,8 @@ class Client:
         self.video_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_target_addr = (dest_ip, dest_port)
         
-        self.mouse = MouseController()
-        self.keyboard = KeyboardController()
+        self.mouse = mouse()
+        self.keyboard = keyboard()
         self.is_running = True
     
     def get_commands(self):
@@ -153,7 +123,7 @@ class Client:
             cv2.circle(img, (draw_x, draw_y), 4, (255, 255, 255), -1)
 
     def handle_screen_record(self, con:socket.socket, target_addr):
-        sct = mss.MSS()
+        sct = mss()
         monitor = sct.monitors[1]
         frame_id = 0
         while self.is_running:
@@ -215,20 +185,20 @@ class Client:
         finally:
             sock.close()
         
-# if __name__ == "__main__":
-#     try:
-#         import config
-#         rdp_port = config.PORTS.get("RDP", 7777)
-#         broadcast_port = config.PORTS.get("Broadcast", 50001)
-#     except ImportError:
-#         rdp_port = 7777
-#         broadcast_port = 50001
+if __name__ == "__main__":
+    try:
+        import config
+        rdp_port = config.PORTS.get("RDP", 7777)
+        broadcast_port = config.PORTS.get("Broadcast", 50001)
+    except ImportError:
+        rdp_port = 7777
+        broadcast_port = 50001
         
-#     server_ip = discover_server_ip(broadcast_port)
-#     if server_ip is None:
-#         print("Could not discover server IP. Exiting.")
-#         sys.exit(1)
+    server_ip = Client.discover_server_ip(broadcast_port)
+    import sys
+    if server_ip is None:
+        sys.exit(1)
         
-#     client = Client(server_ip, rdp_port)
-#     client.start_screen_record()
-#     client.get_commands()
+    client = Client(server_ip, rdp_port)
+    client.start_screen_record()
+    client.get_commands()
